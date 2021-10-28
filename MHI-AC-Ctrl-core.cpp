@@ -1,4 +1,4 @@
-// MHI-AC-Ctrol-core
+// MHI-AC-Ctrl-core
 // implements the core functions (read & write SPI)
 
 #include "MHI-AC-Ctrl-core.h"

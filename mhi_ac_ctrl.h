@@ -19,18 +19,31 @@ public:
             // initialize target temperature to some value so that it's not NAN
             this->target_temperature = roundf(clamp(
                 this->current_temperature, this->minimum_temperature_, this->maximum_temperature_));
-            this->fan_mode = climate::CLIMATE_FAN_AUTO;
+            this->fan_mode = climate::CLIMATE_FAN_LOW;
             this->swing_mode = climate::CLIMATE_SWING_OFF;
         }
         // Never send nan to HA
         if (isnan(this->target_temperature))
             this->target_temperature = 24;
 
+        defrost_.set_icon("mdi:snowflake-melt");
+        
         error_code_.set_icon("mdi:alert-circle");
 
         outdoor_temperature_.set_icon("mdi:thermometer");
         outdoor_temperature_.set_unit_of_measurement("°C");
-        outdoor_temperature_.set_accuracy_decimals(1);
+        outdoor_temperature_.set_accuracy_decimals(2);
+
+        compressor_frequency_.set_icon("mdi:sine-wave");
+        compressor_frequency_.set_unit_of_measurement("Hz");
+        compressor_frequency_.set_accuracy_decimals(2);
+
+        current_.set_icon("mdi:current-ac");
+        current_.set_unit_of_measurement("A");
+        current_.set_accuracy_decimals(2);
+
+        iu_fanspeed_.set_icon("mdi:fan-speed-1");
+        ou_fanspeed_.set_icon("mdi:fan-speed-2");
 
         mhi_ac_ctrl_core.MHIAcCtrlStatus(this);
         mhi_ac_ctrl_core.init();
@@ -55,8 +68,8 @@ public:
     void cbiStatusFunction(ACStatus status, int value) override
     {
         char strtmp[10];
-        static int mode_tmp = 0xff;
         Serial.printf_P(PSTR("status=%i value=%i\n"), status, value);
+        // ESP_LOGCONFIG(TAG, "  status=%i value=%i\n", status, value);
         switch (status) {
         case status_fsck:
             itoa(value, strtmp, 10);
@@ -73,44 +86,50 @@ public:
         case status_power:
             if (value == power_on) {
                 // output_P(status, (TOPIC_POWER), PSTR(PAYLOAD_POWER_ON));
+                is_power_on = true;
                 cbiStatusFunction(status_mode, mode_tmp);
             } else {
                 // output_P(status, (TOPIC_POWER), (PAYLOAD_POWER_OFF));
                 // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_OFF));
+                is_power_on = false;
                 this->mode = climate::CLIMATE_MODE_OFF;
                 this->publish_state();
             }
             break;
         case status_mode:
-            mode_tmp = value;
         case opdata_mode:
         case erropdata_mode:
-            switch (value) {
-            case mode_auto:
-                // if (status != erropdata_mode)
-                //     output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_AUTO));
-                // else
-                //     output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_STOP));
-                this->mode = climate::CLIMATE_MODE_HEAT_COOL;
-                break;
-            case mode_dry:
-                // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_DRY));
-                this->mode = climate::CLIMATE_MODE_DRY;
-                break;
-            case mode_cool:
-                // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_COOL));
-                this->mode = climate::CLIMATE_MODE_COOL;
-                break;
-            case mode_fan:
-                // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_FAN));
-                this->mode = climate::CLIMATE_MODE_FAN_ONLY;
-                break;
-            case mode_heat:
-                // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_HEAT));
-                this->mode = climate::CLIMATE_MODE_HEAT;
-                break;
+            mode_tmp = value;
+            if (is_power_on == true) {
+                switch (value) {
+                case mode_auto:
+                    if (status != erropdata_mode) {
+                        // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_AUTO));
+                        this->mode = climate::CLIMATE_MODE_HEAT_COOL;
+                    } else {
+                        // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_STOP));
+                        this->mode = climate::CLIMATE_MODE_OFF;
+                    }
+                    break;
+                case mode_dry:
+                    // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_DRY));
+                    this->mode = climate::CLIMATE_MODE_DRY;
+                    break;
+                case mode_cool:
+                    // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_COOL));
+                    this->mode = climate::CLIMATE_MODE_COOL;
+                    break;
+                case mode_fan:
+                    // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_FAN));
+                    this->mode = climate::CLIMATE_MODE_FAN_ONLY;
+                    break;
+                case mode_heat:
+                    // output_P(status, PSTR(TOPIC_MODE), PSTR(PAYLOAD_MODE_HEAT));
+                    this->mode = climate::CLIMATE_MODE_HEAT;
+                    break;
+                }
+                this->publish_state();
             }
-            this->publish_state();
             break;
         case status_fan:
             itoa(value + 1, strtmp, 10);
@@ -126,7 +145,7 @@ public:
                 this->fan_mode = climate::CLIMATE_FAN_HIGH;
                 break;
             case 3:
-                this->fan_mode = climate::CLIMATE_FAN_AUTO;
+                this->fan_mode = climate::CLIMATE_FAN_FOCUS;
                 break;
             }
             this->publish_state();
@@ -166,6 +185,7 @@ public:
             itoa(value, strtmp, 10);
             // output_P(status, PSTR(TOPIC_ERRORCODE), strtmp);
             error_code_.publish_state(value);
+            this->publish_state();
             break;
         case opdata_return_air:
         case erropdata_return_air:
@@ -191,6 +211,8 @@ public:
         case erropdata_iu_fanspeed:
             itoa(value, strtmp, 10);
             // output_P(status, PSTR(TOPIC_IU_FANSPEED), strtmp);
+            iu_fanspeed_.publish_state(value);
+            this->publish_state();
             break;
         case opdata_total_iu_run:
         case erropdata_total_iu_run:
@@ -202,6 +224,7 @@ public:
             dtostrf((value - 94) * 0.25f, 0, 2, strtmp);
             // output_P(status, PSTR(TOPIC_OUTDOOR), strtmp);
             outdoor_temperature_.publish_state((value - 94) * 0.25f);
+            this->publish_state();
             break;
         case opdata_tho_r1:
         case erropdata_tho_r1:
@@ -210,9 +233,10 @@ public:
             break;
         case opdata_comp:
         case erropdata_comp:
-            dtostrf(
-                highByte(value) * 25.6f + 0.1f * lowByte(value), 0, 2, strtmp); // to be confirmed
+            dtostrf(highByte(value) * 25.6f + 0.1f * lowByte(value), 0, 2, strtmp); // to be confirmed
             // output_P(status, PSTR(TOPIC_COMP), strtmp);
+            compressor_frequency_.publish_state(highByte(value) * 25.6f + 0.1f * lowByte(value));
+            this->publish_state();
             break;
         case erropdata_td:
         case opdata_td:
@@ -226,6 +250,8 @@ public:
         case erropdata_ct:
             dtostrf(value * 14 / 51.0f, 0, 2, strtmp);
             // output_P(status, PSTR(TOPIC_CT), strtmp);
+            current_.publish_state(value * 14 / 51.0f);
+            this->publish_state();
             break;
         case opdata_tdsh:
             itoa(value, strtmp, 10); // formula for calculation not known
@@ -239,6 +265,8 @@ public:
         case erropdata_ou_fanspeed:
             itoa(value, strtmp, 10);
             // output_P(status, PSTR(TOPIC_OU_FANSPEED), strtmp);
+            ou_fanspeed_.publish_state(value);
+            this->publish_state();
             break;
         case opdata_defrost:
             // if (value)
@@ -246,6 +274,7 @@ public:
             // else
             //     output_P(status, PSTR(TOPIC_DEFROST), PSTR(PAYLOAD_OP_DEFROST_OFF));
             defrost_.publish_state(value != 0);
+            this->publish_state();
             break;
         case opdata_total_comp_run:
         case erropdata_total_comp_run:
@@ -267,7 +296,14 @@ public:
     }
 
     std::vector<Sensor *> get_sensors() {
-        return { &error_code_, &outdoor_temperature_ };
+        return {
+            &error_code_,
+            &outdoor_temperature_,
+            &compressor_frequency_,
+            &current_,
+            &iu_fanspeed_,
+            &ou_fanspeed_,
+        };
     }
 
     std::vector<BinarySensor *> get_binary_sensors() {
@@ -330,7 +366,7 @@ protected:
             case climate::CLIMATE_FAN_HIGH:
                 fan_ = 3;
                 break;
-            case climate::CLIMATE_FAN_AUTO:
+            case climate::CLIMATE_FAN_FOCUS:
             default:
                 fan_ = 4;
                 break;
@@ -371,13 +407,16 @@ protected:
         traits.set_visual_min_temperature(this->minimum_temperature_);
         traits.set_visual_max_temperature(this->maximum_temperature_);
         traits.set_visual_temperature_step(this->temperature_step_);
-        traits.set_supported_fan_modes({ CLIMATE_FAN_AUTO, CLIMATE_FAN_LOW, CLIMATE_FAN_MEDIUM, CLIMATE_FAN_HIGH });
+        traits.set_supported_fan_modes({ CLIMATE_FAN_LOW, CLIMATE_FAN_MEDIUM, CLIMATE_FAN_HIGH, CLIMATE_FAN_FOCUS });
         traits.set_supported_swing_modes({ CLIMATE_SWING_OFF, CLIMATE_SWING_BOTH, CLIMATE_SWING_VERTICAL, CLIMATE_SWING_HORIZONTAL });
         return traits;
     }
 
-    float minimum_temperature_ { 16.0f };
-    float maximum_temperature_ { 36.0f };
+    int mode_tmp = 0xff;
+    bool is_power_on = false;
+
+    float minimum_temperature_ { 18.0f };
+    float maximum_temperature_ { 30.0f };
     float temperature_step_ { 1.0f };
 
     ACPower power_;
@@ -390,5 +429,9 @@ protected:
 
     Sensor error_code_ { "Error code" };
     Sensor outdoor_temperature_ { "Outdoor temperature" };
+    Sensor compressor_frequency_ { "Compressor frequency" };
+    Sensor current_ { "Current" };
+    Sensor iu_fanspeed_ { "Indoor fan speed" };
+    Sensor ou_fanspeed_ { "Outdoor fan speed" };
     BinarySensor defrost_ { "Defrost" };
 };

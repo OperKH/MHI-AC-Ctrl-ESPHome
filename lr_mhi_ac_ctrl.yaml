@@ -1,5 +1,5 @@
 esphome:
-  name: lr_mhi_ac_ctrl
+  name: mhi-room_name
   platform: ESP8266
   board: d1_mini
   includes:
@@ -16,9 +16,10 @@ logger:
   baud_rate: 0
 
 api:
-  reboot_timeout: 0s
+  reboot_timeout: 5min
 
 ota:
+  password: ""
 
 climate:
   - platform: custom
@@ -28,8 +29,8 @@ climate:
       return {mhi_ac_ctrl};
 
     climates:
-      - name: "MHI-AC-Ctrl"
-        id: mhi_ac_ctrl
+      - name: "MHI-AC-Ctrl-room_name"
+        id: mhi_room_name
 
 sensor:
   - platform: custom
@@ -39,6 +40,10 @@ sensor:
     sensors:
       - name: "Error code"
       - name: "Outdoor temperature"
+      - name: "Compressor frequency"
+      - name: "Current"
+      - name: "Indoor fan speed"
+      - name: "Outdoor fan speed"
 
 binary_sensor:
   - platform: custom
